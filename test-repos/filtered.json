@@ -1,0 +1,10 @@
+{
+  "A": ["B", "System.Core", "C"],
+  "B": ["System.Xml", "D"],
+  "C": ["D"],
+  "System.Core": ["E"],
+  "System.Xml": ["F"],
+  "D": [],
+  "E": [],
+  "F": []
+}

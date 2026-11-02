@@ -7,6 +7,7 @@ import argparse
 import os
 import sys
 from fetcher import fetch_direct_dependencies
+from graph import load_test_repo, build_graph_bfs, print_graph
 
 def build_parser() -> argparse.ArgumentParser:
     """Создаёт и возвращает парсер аргументов командной строки."""
@@ -138,7 +139,9 @@ def main() -> int:
     if args.mode == "url":
         print("\nПолучение прямых зависимостей...")
         try:
-            deps = fetch_direct_dependencies(args.package, args.version, args.repo)
+            deps = fetch_direct_dependencies(
+                args.package, args.version, args.repo
+            )
             if not deps:
                 print("Прямых зависимостей не найдено (пакет автономен).")
             else:
@@ -148,6 +151,32 @@ def main() -> int:
         except ValueError as e:
             print(f"Ошибка получения данных: {e}", file=sys.stderr)
             return 1
+
+    elif args.mode == "file":
+        print("\nЗагрузка тестового репозитория...")
+        try:
+            repo = load_test_repo(args.repo)
+        except ValueError as e:
+            print(f"Ошибка загрузки репозитория: {e}", file=sys.stderr)
+            return 1
+
+        def get_deps(pkg: str) -> list[str]:
+            """Возвращает прямые зависимости из тестового репозитория."""
+            return repo.get(pkg, [])
+
+        if args.package not in repo:
+            print(f"Пакет '{args.package}' не найден в репозитории.",
+                  file=sys.stderr)
+            return 1
+
+        graph = build_graph_bfs(
+            args.package,
+            get_deps,
+            filter_substring=args.filter,
+        )
+        print_graph(graph)
+
+    return 0
 
     return 0
 
