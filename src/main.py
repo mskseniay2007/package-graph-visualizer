@@ -6,7 +6,7 @@
 import argparse
 import os
 import sys
-
+from fetcher import fetch_direct_dependencies
 
 def build_parser() -> argparse.ArgumentParser:
     """Создаёт и возвращает парсер аргументов командной строки."""
@@ -122,7 +122,7 @@ def main() -> int:
     """Точка входа приложения.
 
     Returns:
-        Код возврата: 0 при успехе, 1 при ошибке валидации.
+        Код возврата: 0 при успехе, 1 при ошибке.
     """
     parser = build_parser()
     args = parser.parse_args()
@@ -134,6 +134,21 @@ def main() -> int:
         return 1
 
     print_params(args)
+
+    if args.mode == "url":
+        print("\nПолучение прямых зависимостей...")
+        try:
+            deps = fetch_direct_dependencies(args.package, args.version, args.repo)
+            if not deps:
+                print("Прямых зависимостей не найдено (пакет автономен).")
+            else:
+                print(f"Найдено прямых зависимостей: {len(deps)}")
+                for name, version_range in deps:
+                    print(f"  - {name} (версия: {version_range})")
+        except ValueError as e:
+            print(f"Ошибка получения данных: {e}", file=sys.stderr)
+            return 1
+
     return 0
 
 
