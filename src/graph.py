@@ -1,6 +1,6 @@
 """Модуль построения графа зависимостей.
 
-Этап 3: BFS с рекурсией, обработка циклов, фильтрация.
+Этап 3-4: BFS с рекурсией, обработка циклов, фильтрация, обратные зависимости.
 """
 
 import json
@@ -121,3 +121,75 @@ def print_graph(graph: dict[str, list[str]]) -> None:
             print(f"  {pkg} -> {', '.join(deps)}")
         else:
             print(f"  {pkg} -> (нет зависимостей)")
+
+
+def build_reverse_graph(
+    graph: dict[str, list[str]]
+) -> dict[str, list[str]]:
+    """Строит обратный граф: кто зависит от кого.
+
+    Args:
+        graph: Прямой граф {пакет: [зависимости]}.
+
+    Returns:
+        Обратный граф {пакет: [те, кто от него зависит]}.
+    """
+    reverse: dict[str, list[str]] = {}
+
+    for pkg, deps in graph.items():
+        if pkg not in reverse:
+            reverse[pkg] = []
+        for dep in deps:
+            if dep not in reverse:
+                reverse[dep] = []
+            reverse[dep].append(pkg)
+
+    return reverse
+
+
+def find_reverse_dependencies(
+    graph: dict[str, list[str]],
+    target: str,
+    filter_substring: str = "",
+) -> list[str]:
+    """Находит все обратные зависимости для пакета через BFS.
+
+    Args:
+        graph: Прямой граф {пакет: [зависимости]}.
+        target: Имя пакета, для которого ищем обратные зависимости.
+        filter_substring: Подстрока для фильтрации.
+
+    Returns:
+        Список пакетов, которые (прямо или косвенно) зависят от target.
+    """
+    reverse = build_reverse_graph(graph)
+    visited: set[str] = set()
+    result: list[str] = []
+
+    def bfs_reverse(queue: list[str]) -> None:
+        """Рекурсивный обход обратного графа."""
+        if not queue:
+            return
+
+        current = queue.pop(0)
+        if current in visited:
+            bfs_reverse(queue)
+            return
+
+        visited.add(current)
+
+        if should_skip(current, filter_substring):
+            bfs_reverse(queue)
+            return
+
+        if current != target:
+            result.append(current)
+
+        for parent in reverse.get(current, []):
+            if parent not in visited:
+                queue.append(parent)
+
+        bfs_reverse(queue)
+
+    bfs_reverse([target])
+    return sorted(result)

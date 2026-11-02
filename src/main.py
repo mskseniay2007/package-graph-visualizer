@@ -1,114 +1,81 @@
 """CLI-приложение для визуализации графа зависимостей NuGet.
 
-Этап 1: разбор параметров командной строки и их вывод.
+Этапы 1-4: CLI, получение данных, построение графа, обратные зависимости.
 """
 
 import argparse
 import os
 import sys
+
 from fetcher import fetch_direct_dependencies
-from graph import load_test_repo, build_graph_bfs, print_graph
+from graph import (
+    load_test_repo,
+    build_graph_bfs,
+    print_graph,
+    find_reverse_dependencies,
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Создаёт и возвращает парсер аргументов командной строки."""
     parser = argparse.ArgumentParser(
         description="Визуализация графа зависимостей NuGet-пакета."
     )
+    parser.add_argument("--package", required=True, help="Имя пакета.")
+    parser.add_argument("--version", required=True, help="Версия пакета.")
+    parser.add_argument("--repo", required=True, help="URL или путь к файлу.")
     parser.add_argument(
-        "--package",
-        required=True,
-        help="Имя анализируемого пакета (например, Newtonsoft.Json).",
+        "--mode", choices=["url", "file"], default="url",
+        help="Режим работы (url или file)."
     )
     parser.add_argument(
-        "--version",
-        required=True,
-        help="Версия пакета (например, 13.0.3).",
+        "--output", default="graph.svg", help="Имя выходного SVG-файла."
     )
     parser.add_argument(
-        "--repo",
-        required=True,
-        help="URL репозитория или путь к файлу тестового репозитория.",
+        "--ascii", action="store_true", help="Выводить ASCII-дерево."
     )
     parser.add_argument(
-        "--mode",
-        choices=["url", "file"],
-        default="url",
-        help="Режим работы: url (реальный репозиторий) или file (тестовый).",
+        "--filter", default="", help="Подстрока для фильтрации."
     )
     parser.add_argument(
-        "--output",
-        default="graph.svg",
-        help="Имя сгенерированного файла с изображением графа.",
-    )
-    parser.add_argument(
-        "--ascii",
-        action="store_true",
-        help="Выводить зависимости в формате ASCII-дерева.",
-    )
-    parser.add_argument(
-        "--filter",
-        default="",
-        help="Подстрока для фильтрации пакетов по имени.",
+        "--reverse", action="store_true",
+        help="Показывать обратные зависимости."
     )
     return parser
 
 
 def validate_args(args: argparse.Namespace) -> None:
-    """Проверяет корректность параметров.
-
-    Args:
-        args: разобранные аргументы командной строки.
-
-    Raises:
-        ValueError: если какой-либо параметр некорректен.
-    """
+    """Проверяет корректность параметров."""
     if not args.package.strip():
         raise ValueError("Имя пакета не может быть пустым.")
-
     if not args.version.strip():
         raise ValueError("Версия пакета не может быть пустой.")
 
     parts = args.version.split(".")
     if len(parts) < 2:
         raise ValueError(
-            f"Версия '{args.version}' должна содержать минимум две части "
-            "(например, 1.0)."
+            f"Версия '{args.version}' должна содержать минимум две части."
         )
     for p in parts:
         if not p.isdigit():
-            raise ValueError(
-                f"Версия '{args.version}' содержит нецифровую часть '{p}'."
-            )
+            raise ValueError(f"Версия содержит нецифровую часть '{p}'.")
 
     if not args.repo.strip():
         raise ValueError("URL репозитория не может быть пустым.")
 
-    if args.mode == "file":
-        if not os.path.isfile(args.repo):
-            raise ValueError(
-                f"Файл тестового репозитория не найден: {args.repo}"
-            )
+    if args.mode == "file" and not os.path.isfile(args.repo):
+        raise ValueError(f"Файл репозитория не найден: {args.repo}")
 
-    if args.mode == "url":
-        if not (args.repo.startswith("http://")
-                or args.repo.startswith("https://")):
-            raise ValueError(
-                f"URL репозитория должен начинаться с http:// или https://: "
-                f"{args.repo}"
-            )
+    if args.mode == "url" and not (args.repo.startswith("http://")
+                                   or args.repo.startswith("https://")):
+        raise ValueError("URL должен начинаться с http:// или https://.")
 
     if not args.output.endswith(".svg"):
-        raise ValueError(
-            f"Файл графа должен иметь расширение .svg: {args.output}"
-        )
+        raise ValueError("Файл графа должен иметь расширение .svg.")
 
 
 def print_params(args: argparse.Namespace) -> None:
-    """Печатает все параметры в формате ключ-значение.
-
-    Args:
-        args: разобранные аргументы командной строки.
-    """
+    """Печатает параметры."""
     print("Параметры запуска:")
     print(f"  package  = {args.package}")
     print(f"  version  = {args.version}")
@@ -117,14 +84,11 @@ def print_params(args: argparse.Namespace) -> None:
     print(f"  output   = {args.output}")
     print(f"  ascii    = {args.ascii}")
     print(f"  filter   = {args.filter!r}")
+    print(f"  reverse  = {args.reverse}")
 
 
 def main() -> int:
-    """Точка входа приложения.
-
-    Returns:
-        Код возврата: 0 при успехе, 1 при ошибке.
-    """
+    """Точка входа приложения."""
     parser = build_parser()
     args = parser.parse_args()
 
@@ -143,7 +107,7 @@ def main() -> int:
                 args.package, args.version, args.repo
             )
             if not deps:
-                print("Прямых зависимостей не найдено (пакет автономен).")
+                print("Прямых зависимостей не найдено.")
             else:
                 print(f"Найдено прямых зависимостей: {len(deps)}")
                 for name, version_range in deps:
@@ -161,7 +125,6 @@ def main() -> int:
             return 1
 
         def get_deps(pkg: str) -> list[str]:
-            """Возвращает прямые зависимости из тестового репозитория."""
             return repo.get(pkg, [])
 
         if args.package not in repo:
@@ -169,14 +132,30 @@ def main() -> int:
                   file=sys.stderr)
             return 1
 
-        graph = build_graph_bfs(
-            args.package,
-            get_deps,
-            filter_substring=args.filter,
-        )
-        print_graph(graph)
+        if args.reverse:
+            # Для обратных зависимостей строим граф от всех узлов репозитория
+            # (чтобы найти всех, кто ссылается на target).
+            full_graph: dict[str, list[str]] = {}
+            for pkg in repo:
+                g = build_graph_bfs(
+                    pkg, get_deps, filter_substring=args.filter
+                )
+                full_graph.update(g)
 
-    return 0
+            print(f"\nОбратные зависимости для '{args.package}':")
+            reverse_deps = find_reverse_dependencies(
+                full_graph, args.package, filter_substring=args.filter
+            )
+            if not reverse_deps:
+                print("  (нет пакетов, зависящих от этого)")
+            else:
+                for pkg in reverse_deps:
+                    print(f"  - {pkg}")
+        else:
+            graph = build_graph_bfs(
+                args.package, get_deps, filter_substring=args.filter
+            )
+            print_graph(graph)
 
     return 0
 
