@@ -1,6 +1,6 @@
 """CLI-приложение для визуализации графа зависимостей NuGet.
 
-Этапы 1-4: CLI, получение данных, построение графа, обратные зависимости.
+Этапы 1-5: CLI, получение данных, граф, обратные зависимости, визуализация.
 """
 
 import argparse
@@ -14,10 +14,11 @@ from graph import (
     print_graph,
     find_reverse_dependencies,
 )
+from visualizer import graph_to_dot, render_svg, graph_to_ascii_tree
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Создаёт и возвращает парсер аргументов командной строки."""
+    """Создаёт парсер аргументов командной строки."""
     parser = argparse.ArgumentParser(
         description="Визуализация графа зависимостей NuGet-пакета."
     )
@@ -87,6 +88,60 @@ def print_params(args: argparse.Namespace) -> None:
     print(f"  reverse  = {args.reverse}")
 
 
+def _process_file_mode(args: argparse.Namespace) -> int:
+    """Обрабатывает режим file: строит граф и визуализирует."""
+    print("\nЗагрузка тестового репозитория...")
+    try:
+        repo = load_test_repo(args.repo)
+    except ValueError as e:
+        print(f"Ошибка загрузки репозитория: {e}", file=sys.stderr)
+        return 1
+
+    def get_deps(pkg: str) -> list[str]:
+        return repo.get(pkg, [])
+
+    if args.package not in repo:
+        print(f"Пакет '{args.package}' не найден в репозитории.",
+              file=sys.stderr)
+        return 1
+
+    if args.reverse:
+        full_graph: dict[str, list[str]] = {}
+        for pkg in repo:
+            g = build_graph_bfs(pkg, get_deps, filter_substring=args.filter)
+            full_graph.update(g)
+
+        print(f"\nОбратные зависимости для '{args.package}':")
+        reverse_deps = find_reverse_dependencies(
+            full_graph, args.package, filter_substring=args.filter
+        )
+        if not reverse_deps:
+            print("  (нет пакетов, зависящих от этого)")
+        else:
+            for pkg in reverse_deps:
+                print(f"  - {pkg}")
+        return 0
+
+    graph = build_graph_bfs(
+        args.package, get_deps, filter_substring=args.filter
+    )
+    print_graph(graph)
+
+    if args.ascii:
+        print(f"\nASCII-дерево для '{args.package}':")
+        print(graph_to_ascii_tree(graph, args.package))
+
+    try:
+        dot = graph_to_dot(graph, title=args.package)
+        render_svg(dot, args.output)
+        print(f"\nSVG сохранён в: {args.output}")
+    except ValueError as e:
+        print(f"Ошибка визуализации: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
 def main() -> int:
     """Точка входа приложения."""
     parser = build_parser()
@@ -115,47 +170,8 @@ def main() -> int:
         except ValueError as e:
             print(f"Ошибка получения данных: {e}", file=sys.stderr)
             return 1
-
     elif args.mode == "file":
-        print("\nЗагрузка тестового репозитория...")
-        try:
-            repo = load_test_repo(args.repo)
-        except ValueError as e:
-            print(f"Ошибка загрузки репозитория: {e}", file=sys.stderr)
-            return 1
-
-        def get_deps(pkg: str) -> list[str]:
-            return repo.get(pkg, [])
-
-        if args.package not in repo:
-            print(f"Пакет '{args.package}' не найден в репозитории.",
-                  file=sys.stderr)
-            return 1
-
-        if args.reverse:
-            # Для обратных зависимостей строим граф от всех узлов репозитория
-            # (чтобы найти всех, кто ссылается на target).
-            full_graph: dict[str, list[str]] = {}
-            for pkg in repo:
-                g = build_graph_bfs(
-                    pkg, get_deps, filter_substring=args.filter
-                )
-                full_graph.update(g)
-
-            print(f"\nОбратные зависимости для '{args.package}':")
-            reverse_deps = find_reverse_dependencies(
-                full_graph, args.package, filter_substring=args.filter
-            )
-            if not reverse_deps:
-                print("  (нет пакетов, зависящих от этого)")
-            else:
-                for pkg in reverse_deps:
-                    print(f"  - {pkg}")
-        else:
-            graph = build_graph_bfs(
-                args.package, get_deps, filter_substring=args.filter
-            )
-            print_graph(graph)
+        return _process_file_mode(args)
 
     return 0
 
