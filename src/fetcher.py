@@ -7,7 +7,7 @@ import io
 import urllib.request
 import urllib.error
 import zipfile
-import xml.etree.ElementTree as ElementTree
+import xml.etree.ElementTree
 
 HTTP_NOT_FOUND = 404
 
@@ -59,8 +59,8 @@ def extract_nuspec_xml(nupkg_bytes: bytes) -> str:
 def parse_direct_dependencies(nuspec_xml: str) -> list[tuple[str, str]]:
     """Парсит XML .nuspec и извлекает прямые зависимости."""
     try:
-        root = ElementTree.fromstring(nuspec_xml)
-    except ElementTree.ParseError:
+        root = xml.etree.ElementTree.fromstring(nuspec_xml)
+    except xml.etree.ElementTree.ParseError:
         raise ValueError("Ошибка парсинга XML в .nuspec файле.")
 
     for elem in root.iter():
