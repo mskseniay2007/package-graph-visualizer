@@ -1,6 +1,17 @@
 """Тесты для модуля построения графа."""
 
-from src.graph import should_skip, build_reverse_graph, find_reverse_dependencies
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', 'src')
+))
+
+from graph import (
+    should_skip,
+    build_reverse_graph,
+    find_reverse_dependencies,
+)
 
 
 def test_should_skip():
@@ -14,7 +25,6 @@ def test_build_reverse_graph():
     """Проверяет построение обратного графа."""
     graph = {"A": ["B"], "B": ["C"], "C": []}
     reverse = build_reverse_graph(graph)
-    assert "B" in reverse["A"]
     assert "A" in reverse["B"]
     assert "B" in reverse["C"]
 
