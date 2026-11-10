@@ -1,6 +1,6 @@
 """CLI-приложение для визуализации графа зависимостей NuGet.
 
-Этапы 1-5: CLI, получение данных, граф, обратные зависимости, визуализация.
+Этапы 1-5: CLI, получение данных, граф, обратные связи, визуализация.
 """
 
 import argparse
@@ -15,6 +15,9 @@ from graph import (
     find_reverse_dependencies,
 )
 from visualizer import graph_to_dot, render_svg, graph_to_ascii_tree
+
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,40 +91,31 @@ def print_params(args: argparse.Namespace) -> None:
     print(f"  reverse  = {args.reverse}")
 
 
-def _process_file_mode(args: argparse.Namespace) -> int:
-    """Обрабатывает режим file: строит граф и визуализирует."""
-    print("\nЗагрузка тестового репозитория...")
-    try:
-        repo = load_test_repo(args.repo)
-    except ValueError as e:
-        print(f"Ошибка загрузки репозитория: {e}", file=sys.stderr)
-        return 1
+def _do_file_mode_reverse(
+    repo: dict, args: argparse.Namespace, get_deps
+) -> int:
+    """Обрабатывает поиск обратных зависимостей в режиме file."""
+    full_graph: dict[str, list[str]] = {}
+    for pkg in repo:
+        g = build_graph_bfs(pkg, get_deps, filter_substring=args.filter)
+        full_graph.update(g)
 
-    def get_deps(pkg: str) -> list[str]:
-        return repo.get(pkg, [])
+    print(f"\nОбратные зависимости для '{args.package}':")
+    reverse_deps = find_reverse_dependencies(
+        full_graph, args.package, filter_substring=args.filter
+    )
+    if not reverse_deps:
+        print("  (нет пакетов, зависящих от этого)")
+    else:
+        for pkg in reverse_deps:
+            print(f"  - {pkg}")
+    return EXIT_SUCCESS
 
-    if args.package not in repo:
-        print(f"Пакет '{args.package}' не найден в репозитории.",
-              file=sys.stderr)
-        return 1
 
-    if args.reverse:
-        full_graph: dict[str, list[str]] = {}
-        for pkg in repo:
-            g = build_graph_bfs(pkg, get_deps, filter_substring=args.filter)
-            full_graph.update(g)
-
-        print(f"\nОбратные зависимости для '{args.package}':")
-        reverse_deps = find_reverse_dependencies(
-            full_graph, args.package, filter_substring=args.filter
-        )
-        if not reverse_deps:
-            print("  (нет пакетов, зависящих от этого)")
-        else:
-            for pkg in reverse_deps:
-                print(f"  - {pkg}")
-        return 0
-
+def _do_file_mode_forward(
+    args: argparse.Namespace, get_deps
+) -> int:
+    """Обрабатывает построение прямого графа в режиме file."""
     graph = build_graph_bfs(
         args.package, get_deps, filter_substring=args.filter
     )
@@ -137,9 +131,49 @@ def _process_file_mode(args: argparse.Namespace) -> int:
         print(f"\nSVG сохранён в: {args.output}")
     except ValueError as e:
         print(f"Ошибка визуализации: {e}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
-    return 0
+    return EXIT_SUCCESS
+
+
+def _process_file_mode(args: argparse.Namespace) -> int:
+    """Обрабатывает режим file: строит граф и визуализирует."""
+    print("\nЗагрузка тестового репозитория...")
+    try:
+        repo = load_test_repo(args.repo)
+    except ValueError as e:
+        print(f"Ошибка загрузки репозитория: {e}", file=sys.stderr)
+        return EXIT_ERROR
+
+    def get_deps(pkg: str) -> list[str]:
+        return repo.get(pkg, [])
+
+    if args.package not in repo:
+        print(f"Пакет '{args.package}' не найден.", file=sys.stderr)
+        return EXIT_ERROR
+
+    if args.reverse:
+        return _do_file_mode_reverse(repo, args, get_deps)
+    return _do_file_mode_forward(args, get_deps)
+
+
+def _process_url_mode(args: argparse.Namespace) -> int:
+    """Обрабатывает режим url."""
+    print("\nПолучение прямых зависимостей...")
+    try:
+        deps = fetch_direct_dependencies(
+            args.package, args.version, args.repo
+        )
+        if not deps:
+            print("Прямых зависимостей не найдено.")
+        else:
+            print(f"Найдено прямых зависимостей: {len(deps)}")
+            for name, version_range in deps:
+                print(f"  - {name} (версия: {version_range})")
+    except ValueError as e:
+        print(f"Ошибка получения данных: {e}", file=sys.stderr)
+        return EXIT_ERROR
+    return EXIT_SUCCESS
 
 
 def main() -> int:
@@ -151,29 +185,13 @@ def main() -> int:
         validate_args(args)
     except ValueError as e:
         print(f"Ошибка: {e}", file=sys.stderr)
-        return 1
+        return EXIT_ERROR
 
     print_params(args)
 
     if args.mode == "url":
-        print("\nПолучение прямых зависимостей...")
-        try:
-            deps = fetch_direct_dependencies(
-                args.package, args.version, args.repo
-            )
-            if not deps:
-                print("Прямых зависимостей не найдено.")
-            else:
-                print(f"Найдено прямых зависимостей: {len(deps)}")
-                for name, version_range in deps:
-                    print(f"  - {name} (версия: {version_range})")
-        except ValueError as e:
-            print(f"Ошибка получения данных: {e}", file=sys.stderr)
-            return 1
-    elif args.mode == "file":
-        return _process_file_mode(args)
-
-    return 0
+        return _process_url_mode(args)
+    return _process_file_mode(args)
 
 
 if __name__ == "__main__":

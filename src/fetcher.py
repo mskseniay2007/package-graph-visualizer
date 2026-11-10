@@ -7,75 +7,60 @@ import io
 import urllib.request
 import urllib.error
 import zipfile
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ElementTree
+
+HTTP_NOT_FOUND = 404
 
 
 def download_nupkg(package_name: str, version: str, repo_url: str) -> bytes:
-    """Скачивает .nupkg архив пакета и возвращает его байты.
+    """Скачивает .nupkg архив пакета и возвращает его байты."""
+    if "/v3/" in repo_url:
+        base_url = repo_url.rsplit("/v3/", 1)[0]
+    else:
+        base_url = "https://api.nuget.org"
 
-    Args:
-        package_name: Имя пакета (например, Newtonsoft.Json).
-        version: Версия пакета (например, 13.0.3).
-        repo_url: URL репозитория.
-
-    Returns:
-        Байты скачанного .nupkg файла.
-
-    Raises:
-        ValueError: если пакет не найден или произошла ошибка сети.
-    """
-    base_url = repo_url.rsplit("/v3/", 1)[0] if "/v3/" in repo_url else "https://api.nuget.org"
     pkg_lower = package_name.lower()
     version_lower = version.lower()
-
-    url = f"{base_url}/v3-flatcontainer/{pkg_lower}/{version_lower}/{pkg_lower}.{version_lower}.nupkg"
+    url = (
+        f"{base_url}/v3-flatcontainer/{pkg_lower}/{version_lower}/"
+        f"{pkg_lower}.{version_lower}.nupkg"
+    )
 
     try:
         with urllib.request.urlopen(url) as response:
             return response.read()
     except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise ValueError(f"Пакет '{package_name}' версии '{version}' не найден в репозитории.")
+        if e.code == HTTP_NOT_FOUND:
+            msg = (
+                f"Пакет '{package_name}' версии '{version}' "
+                "не найден в репозитории."
+            )
+            raise ValueError(msg)
         raise ValueError(f"Ошибка HTTP при скачивании пакета: {e}")
     except Exception as e:
         raise ValueError(f"Ошибка при скачивании: {e}")
 
 
 def extract_nuspec_xml(nupkg_bytes: bytes) -> str:
-    """Открывает .nupkg в памяти как ZIP, находит .nuspec и возвращает его текст.
-
-    Args:
-        nupkg_bytes: Байты скачанного .nupkg файла.
-
-    Returns:
-        Содержимое .nuspec файла в виде строки.
-
-    Raises:
-        ValueError: если .nuspec не найден или архив повреждён.
-    """
+    """Открывает .nupkg в памяти как ZIP, находит .nuspec."""
     try:
         with zipfile.ZipFile(io.BytesIO(nupkg_bytes)) as zf:
-            nuspec_files = [n for n in zf.namelist() if n.endswith(".nuspec")]
+            nuspec_files = [
+                n for n in zf.namelist() if n.endswith(".nuspec")
+            ]
             if not nuspec_files:
                 raise ValueError("В архиве не найден .nuspec файл.")
             with zf.open(nuspec_files[0]) as nuspec_file:
                 return nuspec_file.read().decode("utf-8")
     except zipfile.BadZipFile:
-        raise ValueError("Скачанный файл не является корректным ZIP-архивом (.nupkg).")
+        raise ValueError("Файл не является корректным ZIP-архивом.")
 
 
 def parse_direct_dependencies(nuspec_xml: str) -> list[tuple[str, str]]:
-    """Парсит XML .nuspec и извлекает прямые зависимости.
-
-    Args:
-        nuspec_xml: Содержимое .nuspec файла.
-
-    Returns:
-        Список кортежей (имя_зависимости, версия_или_диапазон).
-    """
+    """Парсит XML .nuspec и извлекает прямые зависимости."""
     try:
-        root = ET.fromstring(nuspec_xml)
-    except ET.ParseError:
+        root = ElementTree.fromstring(nuspec_xml)
+    except ElementTree.ParseError:
         raise ValueError("Ошибка парсинга XML в .nuspec файле.")
 
     for elem in root.iter():
@@ -83,7 +68,6 @@ def parse_direct_dependencies(nuspec_xml: str) -> list[tuple[str, str]]:
             elem.tag = elem.tag.split('}', 1)[1]
 
     dependencies = []
-
     for deps_block in root.iter("dependencies"):
         for dep in deps_block.iter("dependency"):
             dep_id = dep.get("id")
@@ -94,17 +78,10 @@ def parse_direct_dependencies(nuspec_xml: str) -> list[tuple[str, str]]:
     return sorted(list(set(dependencies)))
 
 
-def fetch_direct_dependencies(package_name: str, version: str, repo_url: str) -> list[tuple[str, str]]:
-    """Главная функция: скачивает пакет и возвращает его прямые зависимости.
-
-    Args:
-        package_name: Имя пакета.
-        version: Версия пакета.
-        repo_url: URL репозитория.
-
-    Returns:
-        Список кортежей (имя, версия).
-    """
+def fetch_direct_dependencies(
+    package_name: str, version: str, repo_url: str
+) -> list[tuple[str, str]]:
+    """Скачивает пакет и возвращает его прямые зависимости."""
     nupkg_bytes = download_nupkg(package_name, version, repo_url)
     nuspec_xml = extract_nuspec_xml(nupkg_bytes)
     return parse_direct_dependencies(nuspec_xml)
