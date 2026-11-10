@@ -1,10 +1,12 @@
 """Модуль построения графа зависимостей.
 
-Этап 3-4: BFS с рекурсией, обработка циклов, фильтрация, обратные связи.
+Этапы 3-4: BFS с рекурсией, обработка циклов, фильтрация, обратные связи.
 """
 
 import json
 from typing import Callable
+
+DEFAULT_MAX_DEPTH = 100
 
 
 def load_test_repo(path: str) -> dict[str, list[str]]:
@@ -32,15 +34,13 @@ def should_skip(name: str, filter_substring: str) -> bool:
 def _process_bfs_node(
     current_pkg: str,
     depth: int,
-    max_depth: int,
     get_deps: Callable[[str], list[str]],
     filter_sub: str,
-    graph: dict[str, list[str]],
-    visited: set[str],
-    queue: list[tuple[str, int]]
+    state: dict,
+    max_depth: int,
 ) -> None:
     """Обрабатывает один узел в BFS и добавляет соседей в очередь."""
-    visited.add(current_pkg)
+    state["visited"].add(current_pkg)
     if depth > max_depth:
         return
 
@@ -52,41 +52,43 @@ def _process_bfs_node(
     filtered_deps = [
         d for d in deps if not should_skip(d, filter_sub)
     ]
-    graph[current_pkg] = filtered_deps
+    state["graph"][current_pkg] = filtered_deps
 
     for dep in filtered_deps:
-        if dep not in visited:
-            queue.append((dep, depth + 1))
+        if dep not in state["visited"]:
+            state["queue"].append((dep, depth + 1))
 
 
 def build_graph_bfs(
     root_package: str,
     get_dependencies: Callable[[str], list[str]],
     filter_substring: str = "",
-    max_depth: int = 100,
+    max_depth: int = DEFAULT_MAX_DEPTH,
 ) -> dict[str, list[str]]:
     """Строит граф зависимостей через BFS с рекурсией."""
-    graph: dict[str, list[str]] = {}
-    visited: set[str] = set()
+    state = {
+        "graph": {},
+        "visited": set(),
+        "queue": [(root_package, 0)],
+    }
 
-    def bfs_recursive(queue: list[tuple[str, int]]) -> None:
-        if not queue:
+    def bfs_recursive() -> None:
+        if not state["queue"]:
             return
-        current_pkg, depth = queue.pop(0)
+        current_pkg, depth = state["queue"].pop(0)
 
-        if current_pkg in visited:
-            bfs_recursive(queue)
+        if current_pkg in state["visited"]:
+            bfs_recursive()
             return
 
         _process_bfs_node(
-            current_pkg, depth, max_depth,
-            get_dependencies, filter_substring,
-            graph, visited, queue
+            current_pkg, depth, get_dependencies,
+            filter_substring, state, max_depth
         )
-        bfs_recursive(queue)
+        bfs_recursive()
 
-    bfs_recursive([(root_package, 0)])
-    return graph
+    bfs_recursive()
+    return state["graph"]
 
 
 def print_graph(graph: dict[str, list[str]]) -> None:
@@ -117,21 +119,19 @@ def build_reverse_graph(
 def _process_reverse_node(
     current: str,
     target: str,
-    reverse: dict[str, list[str]],
     filter_sub: str,
-    visited: set[str],
-    result: list[str],
-    queue: list[str]
+    state: dict,
 ) -> None:
     """Обрабатывает один узел при поиске обратных зависимостей."""
-    visited.add(current)
+    state["visited"].add(current)
     if should_skip(current, filter_sub):
         return
     if current != target:
-        result.append(current)
-    for parent in reverse.get(current, []):
-        if parent not in visited:
-            queue.append(parent)
+        state["result"].append(current)
+
+    for parent in state["reverse"].get(current, []):
+        if parent not in state["visited"]:
+            state["queue"].append(parent)
 
 
 def find_reverse_dependencies(
@@ -140,23 +140,24 @@ def find_reverse_dependencies(
     filter_substring: str = "",
 ) -> list[str]:
     """Находит все обратные зависимости для пакета через BFS."""
-    reverse = build_reverse_graph(graph)
-    visited: set[str] = set()
-    result: list[str] = []
+    state = {
+        "reverse": build_reverse_graph(graph),
+        "visited": set(),
+        "result": [],
+        "queue": [target],
+    }
 
-    def bfs_reverse(queue: list[str]) -> None:
-        if not queue:
+    def bfs_reverse() -> None:
+        if not state["queue"]:
             return
-        current = queue.pop(0)
-        if current in visited:
-            bfs_reverse(queue)
+        current = state["queue"].pop(0)
+
+        if current in state["visited"]:
+            bfs_reverse()
             return
 
-        _process_reverse_node(
-            current, target, reverse,
-            filter_substring, visited, result, queue
-        )
-        bfs_reverse(queue)
+        _process_reverse_node(current, target, filter_substring, state)
+        bfs_reverse()
 
-    bfs_reverse([target])
-    return sorted(result)
+    bfs_reverse()
+    return sorted(state["result"])
